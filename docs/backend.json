@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "UserFact": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "UserFact",
+      "type": "object",
+      "description": "Stores individual facts about a user to provide context for the LLM.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the user fact.",
+          "format": "uuid"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to the user this fact belongs to."
+        },
+        "fact": {
+          "type": "string",
+          "description": "The fact about the user (e.g., 'Likes Python')."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Timestamp of when the fact was recorded.",
+          "format": "date-time"
+        },
+        "relevanceScore": {
+          "type": "number",
+          "description": "Score indicating the relevance of the fact to the current conversation. Higher score indicates greater relevance."
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "fact",
+        "timestamp",
+        "relevanceScore"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}/facts/{factId}",
+        "definition": {
+          "entityName": "UserFact",
+          "schema": {
+            "$ref": "#/backend/entities/UserFact"
+          },
+          "description": "Stores facts specific to each user, used to contextualize LLM prompts. Path-based ownership ensures only the user can access their own data.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier for the user."
+            },
+            {
+              "name": "factId",
+              "description": "The unique identifier for the user fact."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore structure is designed to store user facts extracted and used to contextualize LLM prompts. It leverages path-based ownership for securing user-specific data. Specifically, user facts are stored within a subcollection of each user's document. This ensures that only the user has access to their own facts, eliminating the need for complex security rules based on document content or hierarchical `get()` calls. The structure achieves Authorization Independence by isolating each user's data under their own `userId`, eliminating cross-user authorization checks. This simplifies rules and enables atomic operations. Because the data is nested under the user, QAPs are easily met by scoping `list` operations to the user's path and enforcing the schema."
+  }
+}
