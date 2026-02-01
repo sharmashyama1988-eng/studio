@@ -2,7 +2,6 @@
 
 import { ai } from "@/ai/genkit";
 import type { ChatMessage, UserFact } from "@/lib/types";
-import { generateStartingPrompts } from "@/ai/flows/generate-starting-prompts";
 import { extractUserFacts } from "@/ai/flows/extract-user-facts";
 import { classifyIntent } from "@/ai/flows/classify-intent";
 import { answerWithSearch } from "@/ai/flows/answer-with-search";
@@ -58,20 +57,12 @@ ${facts.map(fact => `- ${fact.fact}`).join('\n')}
 }
 
 export async function getStartingPrompts(): Promise<string[]> {
-  try {
-    const result = await generateStartingPrompts({
-      topic: 'AI, technology, and space exploration',
-      count: 4,
-    });
-    return result.prompts;
-  } catch (error) {
-    console.error("Error getting starting prompts:", error);
-    // Provide fallback prompts if the AI call fails
-    return [
-      "What is a Large Language Model?",
-      "Explain quantum computing in simple terms.",
-      "Write a python script to fetch weather data from an API.",
-      "What are the latest discoveries from the James Webb Space Telescope?",
-    ];
-  }
+  // Return a static list of prompts to avoid hitting API rate limits on page load.
+  // The AI call was causing a "429 Too Many Requests" error.
+  return [
+    "What is a Large Language Model?",
+    "Explain quantum computing in simple terms.",
+    "Write a python script to fetch weather data from an API.",
+    "What are the latest discoveries from the James Webb Space Telescope?",
+  ];
 }
