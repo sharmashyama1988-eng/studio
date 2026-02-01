@@ -1,3 +1,4 @@
+
 "use client";
 import { useState, useRef, useEffect, type FormEvent } from "react";
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
@@ -53,7 +54,6 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
       setIsListening(false);
     };
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error', event.error);
       if (event.error === 'not-allowed') {
         toast({
           variant: "destructive",
@@ -61,6 +61,7 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
           description: "Please allow microphone access in your browser to use this feature.",
         });
       } else if (event.error !== 'no-speech') {
+        console.error('Speech recognition error', event.error);
         toast({
           variant: "destructive",
           title: "Speech Recognition Error",
@@ -136,8 +137,12 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
     utterance.onend = () => {
       setSpeakingMessageId(null);
     };
-    utterance.onerror = (e) => {
-      console.error("Speech synthesis error", e);
+    utterance.onerror = (e: any) => {
+      if (e.error === 'canceled' || e.error === 'interrupted') {
+        setSpeakingMessageId(null);
+        return;
+      }
+      console.error("Speech synthesis error", e.error);
       toast({
         variant: "destructive",
         title: "Text-to-Speech Error",
