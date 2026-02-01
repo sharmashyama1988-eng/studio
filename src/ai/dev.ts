@@ -1,1 +1,6 @@
-// Flows will be imported for their side effects in this file.
+import { config } from 'dotenv';
+config();
+
+import '@/ai/flows/summarize-web-search-results.ts';
+import '@/ai/flows/generate-starting-prompts.ts';
+import '@/ai/flows/analyze-sentiment-of-search-results.ts';
