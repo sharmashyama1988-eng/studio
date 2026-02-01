@@ -55,7 +55,7 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
   // Fetch user facts from Firestore
   const factsCollectionRef = useMemoFirebase(() => {
     if (!firestore || !user) return null;
-    return collection(firestore, "users", user.uid, "facts");
+    return collection(firestore, "users", user.uid, "userFacts");
   }, [firestore, user]);
 
   const { data: userFacts } = useCollection<UserFact>(factsCollectionRef);
