@@ -1,9 +1,11 @@
 'use server';
 
-import { summarizeWebSearchResults } from "@/ai/flows/summarize-web-search-results";
+import { ai } from "@/ai/genkit";
 import type { ChatMessage, UserFact } from "@/lib/types";
 import { generateStartingPrompts } from "@/ai/flows/generate-starting-prompts";
 import { extractUserFacts } from "@/ai/flows/extract-user-facts";
+import { classifyIntent } from "@/ai/flows/classify-intent";
+import { answerWithSearch } from "@/ai/flows/answer-with-search";
 
 export async function extractFactsFromMessage(message: string): Promise<string[]> {
   try {
@@ -17,30 +19,41 @@ export async function extractFactsFromMessage(message: string): Promise<string[]
 
 export async function getAiResponse(history: ChatMessage[], facts: UserFact[]): Promise<string> {
   const latestUserMessage = history[history.length - 1].content;
-  
-  const factsContext = facts.length > 0
-    ? `
+
+  try {
+    // 1. Classify Intent
+    const { intent } = await classifyIntent({ message: latestUserMessage });
+
+    // 2. Route based on intent
+    if (intent === 'search') {
+      console.log("[Intent] Classified as 'search'. Using web search tool.");
+      return await answerWithSearch({ history, facts });
+    } else {
+      console.log("[Intent] Classified as 'casual'. Using local model only.");
+      // Case A: Casual/Reasoning - USE ONLY LOCAL LLM (no tools)
+      const factsContext = facts.length > 0
+        ? `
 Here are some facts about the user you are talking to. Use them to personalize your response:
 ---
 ${facts.map(fact => `- ${fact.fact}`).join('\n')}
 ---
 `
-    : '';
+        : '';
+      
+      const { text } = await ai.generate({
+        model: 'googleai/gemini-2.5-flash',
+        system: `You are Vyom, a helpful, witty, and friendly AI companion, not a robot. You speak in a mix of Hindi and English (Hinglish). You answer naturally, show empathy, and have your own opinions. Keep answers concise/short to ensure speed on mobile devices.
+        ${factsContext}
+        `,
+        history: history.map(m => ({role: m.role, content: m.content})),
+        prompt: latestUserMessage,
+      });
+      return text;
+    }
 
-  const prompt = `You are Vyom AI, a helpful and intelligent assistant. Below is a user's query. Provide a helpful, well-structured, and concise response. If the query involves code, provide a markdown code snippet with the correct language tag.
-  ${factsContext}
-  User Query:
-  ---
-  ${latestUserMessage}
-  ---
-  `;
-
-  try {
-    const result = await summarizeWebSearchResults({ searchResults: prompt });
-    return result.summary;
   } catch (error) {
-    console.error("Error getting AI response:", error);
-    return "Sorry, I encountered an error. Please try again.";
+    console.error("Error in getAiResponse:", error);
+    return "Sorry, I had trouble understanding that. Please try again.";
   }
 }
 
