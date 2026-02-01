@@ -1,97 +1,125 @@
 /**
  * Core Philosophy: This ruleset enforces a strict user-ownership model. All data is
  * considered private and is only accessible by the user who owns it. The security
- * model relies on path-based ownership, where a user's unique ID is a segment in
- * the document path.
+ * model is designed to be simple, performant, and secure by default.
  *
- * Data Structure: The data is organized hierarchically. All user-specific data,
- * specifically 'UserFact' documents, is stored in a subcollection nested under a
- * path segment containing the user's ID (`/users/{userId}/facts/{factId}`). This
- * structure ensures a clear and secure separation of data between users.
+ * Data Structure: The data is organized hierarchically under a top-level `users`
+ * collection. Each user's data, including their profile (`/users/{userId}`) and
+ * personal facts (`/users/{userId}/userFacts/{userFactId}`), is nested within their
+ * unique document tree, identified by their user ID.
  *
  * Key Security Decisions:
- * - User Isolation: Users can only read and write data within their own data tree.
- *   They cannot see, list, or modify the data of any other user.
- * - Path-Based Security: Authorization is determined primarily by the document path,
- *   making rules fast, simple, and not reliant on costly `get()` calls to other
- *   documents.
- * - Relational Integrity: On creation, rules validate that the `userId` field within
- *   a document's data matches the `userId` in its path, ensuring consistency.
- * - Immutability: Critical relational fields like `userId` are made immutable after
- *   creation to prevent documents from being re-assigned to different users.
- * - Prototyping Flexibility: Data shape and type validation are intentionally omitted
- *   to allow for rapid iteration on the application's data model without needing to
- *   update security rules for every schema change. Only fields critical for
- *   authorization (`userId`) are validated.
+ * - Default Denial: Access is denied by default. All permissions must be explicitly granted.
+ * - User Scoping: All rules are scoped to the authenticated user (`request.auth.uid`).
+ *   A user can only ever interact with data under their own `/users/{userId}` path.
+ * - No User Enumeration: Listing documents in the top-level `/users` collection is
+ *   explicitly forbidden to prevent scraping of user profiles.
+ * - No Public Data: There are no publicly readable collections in this model.
+ *
+ * Denormalization for Authorization: To ensure fast and simple authorization, the
+ * rules rely on the document's path (`/users/{userId}`) as the primary source of
+ * truth for ownership. Additionally, on creation, a `userId` field within a `UserFact`
+ * document is validated against the path to enforce relational integrity without
+ * requiring costly `get()` calls in subcollection rules.
+ *
+ * Structural Segregation: User-specific data (`userFacts`) is stored in a dedicated
+ * subcollection under the user's main document. This segregation simplifies rules
+ * and ensures that queries for one type of data cannot accidentally expose another.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- Helper Functions ---
-
+    // Helper functions for reusable logic
     /**
-     * Checks if a user is authenticated.
+     * isSignedIn
+     * Checks if the user is authenticated.
      */
     function isSignedIn() {
       return request.auth != null;
     }
 
     /**
-     * Checks if the requesting user's UID matches the provided userId from the path.
-     * This is the foundation of the user-ownership model.
-     * @param userId The user ID from the document path.
+     * isOwner
+     * Checks if the authenticated user's ID matches the requested resource's owner ID.
      */
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
     /**
-     * Checks for ownership on an existing document. Used for update and delete
-     * operations to prevent acting on non-existent data.
-     * @param userId The user ID from the document path.
+     * isExistingOwner
+     * Combines ownership check with a check that the resource already exists.
+     * Crucial for safe update and delete operations.
      */
     function isExistingOwner(userId) {
       return isOwner(userId) && resource != null;
     }
 
     /**
-     * Validates that the new 'UserFact' document being created contains a 'userId'
-     * field that correctly matches the user ID in the path.
-     * This enforces relational integrity at the moment of creation.
-     * @param userId The user ID from the document path.
+     * hasValidUserData
+     * On create, validates that the user document's internal `id` field matches the
+     * user's auth ID, ensuring path and data consistency.
      */
-    function hasValidFactDataOnCreate(userId) {
+    function hasValidUserData(userId) {
+      return request.resource.data.id == userId;
+    }
+
+    /**
+     * hasImmutableUserId
+     * On update, ensures the user document's internal `id` field cannot be changed.
+     * This protects the fundamental link between the document and its owner.
+     */
+    function hasImmutableUserId() {
+      return request.resource.data.id == resource.data.id;
+    }
+
+    /**
+     * hasValidUserFactData
+     * On create, validates that the userFact document's internal `userId` field
+     * matches the owner's ID from the path.
+     */
+    function hasValidUserFactData(userId) {
       return request.resource.data.userId == userId;
     }
 
     /**
-     * Validates that the 'userId' field of a 'UserFact' document is not changed
-     * during an update operation, ensuring ownership is immutable.
+     * hasImmutableUserFactOwner
+     * On update, ensures the ownership link (`userId` field) on a userFact
+     * document cannot be changed.
      */
-    function isUserIdImmutable() {
+    function hasImmutableUserFactOwner() {
       return request.resource.data.userId == resource.data.userId;
     }
 
+
     /**
-     * @description Rules for the 'facts' subcollection, ensuring users can only manage
-     *              their own personal facts for LLM contextualization.
-     * @path /users/{userId}/facts/{factId}
-     * @allow A signed-in user with UID 'user123' creating a new fact document at
-     *        `/users/user123/facts/fact_abc`. (create)
-     * @deny A signed-in user with UID 'user456' trying to read a fact at
-     *       `/users/user123/facts/fact_abc`. (get)
-     * @principle Restricts access to a user's own data tree using path-based ownership.
+     * @description   Manages user profile documents.
+     * @path          /users/{userId}
+     * @allow         A signed-in user (uid: 'user123') can (create) or (get) their own profile document at `/users/user123`.
+     * @deny          A signed-in user (uid: 'user456') cannot (get) another user's profile at `/users/user123`. Listing all users is also denied.
+     * @principle     Restricts access to a user's own data tree and prevents user enumeration.
      */
-    match /users/{userId}/facts/{factId} {
-      // READ: Allow users to read and list their own facts.
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && hasValidUserData(userId);
+      allow update: if isExistingOwner(userId) && hasImmutableUserId();
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description   Manages facts specific to a user.
+     * @path          /users/{userId}/userFacts/{userFactId}
+     * @allow         A signed-in user (uid: 'user123') can (create), (list), or (delete) facts within their own subcollection at `/users/user123/userFacts/...`.
+     * @deny          A signed-in user (uid: 'user456') cannot (list) or (create) facts in another user's subcollection at `/users/user123/userFacts/...`.
+     * @principle     Enforces strict document ownership within a user's private subcollection.
+     */
+    match /users/{userId}/userFacts/{userFactId} {
       allow get: if isOwner(userId);
       allow list: if isOwner(userId);
-
-      // WRITE: Allow users to create, update, and delete their own facts,
-      // with validation to ensure relational integrity.
-      allow create: if isOwner(userId) && hasValidFactDataOnCreate(userId);
-      allow update: if isExistingOwner(userId) && isUserIdImmutable();
+      allow create: if isOwner(userId) && hasValidUserFactData(userId);
+      allow update: if isExistingOwner(userId) && hasImmutableUserFactOwner();
       allow delete: if isExistingOwner(userId);
     }
   }

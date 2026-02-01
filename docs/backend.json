@@ -4,29 +4,29 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "UserFact",
       "type": "object",
-      "description": "Stores individual facts about a user to provide context for the LLM.",
+      "description": "Entity storing facts about the user, extracted from chat history.",
       "properties": {
         "id": {
           "type": "string",
-          "description": "Unique identifier for the user fact.",
-          "format": "uuid"
+          "description": "Unique identifier for the UserFact entity."
         },
         "userId": {
           "type": "string",
-          "description": "Reference to the user this fact belongs to."
+          "description": "Reference to the User. (Relationship: User 1:N UserFact).",
+          "format": "uuid"
         },
         "fact": {
           "type": "string",
-          "description": "The fact about the user (e.g., 'Likes Python')."
+          "description": "The fact extracted from the user's input (e.g., 'I like Python')."
         },
         "timestamp": {
           "type": "string",
-          "description": "Timestamp of when the fact was recorded.",
+          "description": "Timestamp indicating when the fact was stored.",
           "format": "date-time"
         },
-        "relevanceScore": {
-          "type": "number",
-          "description": "Score indicating the relevance of the fact to the current conversation. Higher score indicates greater relevance."
+        "source": {
+          "type": "string",
+          "description": "Source of the fact (e.g., the chat message ID where it was mentioned)."
         }
       },
       "required": [
@@ -34,7 +34,34 @@
         "userId",
         "fact",
         "timestamp",
-        "relevanceScore"
+        "source"
+      ]
+    },
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Entity representing a user of the application.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the User entity.",
+          "format": "uuid"
+        },
+        "username": {
+          "type": "string",
+          "description": "The user's username."
+        },
+        "email": {
+          "type": "string",
+          "description": "The user's email address.",
+          "format": "email"
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "email"
       ]
     }
   },
@@ -47,26 +74,42 @@
   "firestore": {
     "structure": [
       {
-        "path": "/users/{userId}/facts/{factId}",
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "User",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Stores user profile information. Path-based ownership ensures that only the user can access their profile.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/userFacts/{userFactId}",
         "definition": {
           "entityName": "UserFact",
           "schema": {
             "$ref": "#/backend/entities/UserFact"
           },
-          "description": "Stores facts specific to each user, used to contextualize LLM prompts. Path-based ownership ensures only the user can access their own data.",
+          "description": "Stores facts about a specific user. Path-based ownership ensures that only the user can access their facts.",
           "params": [
             {
               "name": "userId",
-              "description": "The unique identifier for the user."
+              "description": "The unique identifier of the user."
             },
             {
-              "name": "factId",
-              "description": "The unique identifier for the user fact."
+              "name": "userFactId",
+              "description": "The unique identifier of the UserFact."
             }
           ]
         }
       }
     ],
-    "reasoning": "The Firestore structure is designed to store user facts extracted and used to contextualize LLM prompts. It leverages path-based ownership for securing user-specific data. Specifically, user facts are stored within a subcollection of each user's document. This ensures that only the user has access to their own facts, eliminating the need for complex security rules based on document content or hierarchical `get()` calls. The structure achieves Authorization Independence by isolating each user's data under their own `userId`, eliminating cross-user authorization checks. This simplifies rules and enables atomic operations. Because the data is nested under the user, QAPs are easily met by scoping `list` operations to the user's path and enforcing the schema."
+    "reasoning": "The Firestore structure is designed to securely store user data and user facts. It leverages path-based ownership for private user data and ensures authorization independence by avoiding hierarchical `get()` calls in the security rules. This approach allows for atomic operations and easier debugging. The segregation of user data into dedicated collections simplifies the security rules and ensures consistent access control. The structure is optimized for secure `list` operations (QAPs) using path-based ownership, ensuring only the authorized user can access their facts."
   }
 }
