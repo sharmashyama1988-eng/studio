@@ -54,7 +54,13 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
     };
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error', event.error);
-      if (event.error !== 'no-speech') {
+      if (event.error === 'not-allowed') {
+        toast({
+          variant: "destructive",
+          title: "Microphone Access Denied",
+          description: "Please allow microphone access in your browser to use this feature.",
+        });
+      } else if (event.error !== 'no-speech') {
         toast({
           variant: "destructive",
           title: "Speech Recognition Error",
