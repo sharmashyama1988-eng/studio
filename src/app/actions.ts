@@ -1,14 +1,34 @@
 'use server';
 
 import { summarizeWebSearchResults } from "@/ai/flows/summarize-web-search-results";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, UserFact } from "@/lib/types";
 import { generateStartingPrompts } from "@/ai/flows/generate-starting-prompts";
+import { extractUserFacts } from "@/ai/flows/extract-user-facts";
 
-export async function getAiResponse(history: ChatMessage[]): Promise<string> {
+export async function extractFactsFromMessage(message: string): Promise<string[]> {
+  try {
+    const result = await extractUserFacts({ userInput: message });
+    return result.facts;
+  } catch (error) {
+    console.error("Error extracting facts:", error);
+    return [];
+  }
+}
+
+export async function getAiResponse(history: ChatMessage[], facts: UserFact[]): Promise<string> {
   const latestUserMessage = history[history.length - 1].content;
   
-  const prompt = `You are Vyom AI, a helpful and intelligent assistant. Below is a user's query. Provide a helpful, well-structured, and concise response. If the query involves code, provide a markdown code snippet with the correct language tag.
+  const factsContext = facts.length > 0
+    ? `
+Here are some facts about the user you are talking to. Use them to personalize your response:
+---
+${facts.map(fact => `- ${fact.fact}`).join('\n')}
+---
+`
+    : '';
 
+  const prompt = `You are Vyom AI, a helpful and intelligent assistant. Below is a user's query. Provide a helpful, well-structured, and concise response. If the query involves code, provide a markdown code snippet with the correct language tag.
+  ${factsContext}
   User Query:
   ---
   ${latestUserMessage}

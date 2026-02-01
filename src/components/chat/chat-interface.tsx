@@ -1,8 +1,8 @@
 
 "use client";
 import { useState, useRef, useEffect, type FormEvent } from "react";
-import type { ChatMessage as ChatMessageType } from "@/lib/types";
-import { getAiResponse } from "@/app/actions";
+import type { ChatMessage as ChatMessageType, UserFact } from "@/lib/types";
+import { getAiResponse, extractFactsFromMessage } from "@/app/actions";
 import { v4 as uuidv4 } from "uuid";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,6 +16,16 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
+import {
+  useFirebase,
+  useUser,
+  initiateAnonymousSignIn,
+  useCollection,
+  useMemoFirebase,
+  addDocumentNonBlocking,
+} from "@/firebase";
+import { collection, serverTimestamp } from "firebase/firestore";
+
 
 export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }) {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
@@ -31,6 +41,25 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
   const [speechRate, setSpeechRate] = useState(1);
   const [speechPitch, setSpeechPitch] = useState(1);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+
+  const { auth, firestore } = useFirebase();
+  const { user, isUserLoading } = useUser();
+
+  // Anonymous sign-in
+  useEffect(() => {
+    if (!isUserLoading && !user && auth) {
+      initiateAnonymousSignIn(auth);
+    }
+  }, [isUserLoading, user, auth]);
+
+  // Fetch user facts from Firestore
+  const factsCollectionRef = useMemoFirebase(() => {
+    if (!firestore || !user) return null;
+    return collection(firestore, "users", user.uid, "facts");
+  }, [firestore, user]);
+
+  const { data: userFacts } = useCollection<UserFact>(factsCollectionRef);
+
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -157,7 +186,7 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
   };
 
   const handleMessageSubmit = async (content: string) => {
-    if (isLoading || !content.trim()) return;
+    if (isLoading || !content.trim() || !user) return;
 
     const userMessage: ChatMessageType = {
       id: uuidv4(),
@@ -170,8 +199,31 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
     setInputValue("");
     inputRef.current?.focus();
 
+    // --- Start of Smart Memory logic ---
+
+    // 1. Extract facts from the user's message and save them (non-blocking)
+    extractFactsFromMessage(content).then(extractedFacts => {
+      if (extractedFacts.length > 0 && factsCollectionRef) {
+        const existingFacts = userFacts?.map(f => f.fact.toLowerCase().trim()) || [];
+        extractedFacts.forEach(factText => {
+          // Avoid saving duplicate facts
+          if (!existingFacts.includes(factText.toLowerCase().trim())) {
+            const newFact: Omit<UserFact, 'id'> = {
+              userId: user.uid,
+              fact: factText,
+              timestamp: serverTimestamp(),
+              relevanceScore: 0.5, // Default relevance
+            };
+            addDocumentNonBlocking(factsCollectionRef, newFact);
+          }
+        });
+      }
+    });
+
+    // 2. Get AI response with facts as context
     try {
-      const aiResponse = await getAiResponse(newMessages);
+      const factsForPrompt = userFacts || [];
+      const aiResponse = await getAiResponse(newMessages, factsForPrompt);
       const assistantMessage: ChatMessageType = {
         id: uuidv4(),
         role: "assistant",
@@ -188,6 +240,7 @@ export function ChatInterface({ startingPrompts }: { startingPrompts: string[] }
     } finally {
       setIsLoading(false);
     }
+    // --- End of Smart Memory logic ---
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
